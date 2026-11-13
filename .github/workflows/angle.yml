@@ -1,0 +1,46 @@
+name: angle-macos
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - name: depot_tools and ANGLE
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$HOME/depot_tools"
+          echo "$HOME/depot_tools" >> "$GITHUB_PATH"
+          git clone https://chromium.googlesource.com/angle/angle "$HOME/angle"
+          cd "$HOME/angle" && git log --oneline -1
+      - name: Sync third_party
+        run: |
+          cd "$HOME/angle"
+          python3 scripts/bootstrap.py
+          gclient sync --no-history --shallow -j8 2>&1 | tail -20
+          df -h . | tail -1
+      - name: Build libEGL and libGLESv2 (Vulkan and Metal backends, arm64)
+        run: |
+          cd "$HOME/angle"
+          gn gen out/mac --args='is_debug=false is_component_build=false target_cpu="arm64" angle_enable_vulkan=true angle_enable_metal=true angle_enable_gl=false angle_enable_swiftshader=false angle_build_tests=false angle_has_frame_capture=false build_with_chromium=false is_official_build=false symbol_level=0'
+          autoninja -C out/mac libEGL libGLESv2 2>&1 | tail -20
+          ls -la out/mac/*.dylib
+      - name: MoltenVK (Vulkan on Metal)
+        run: |
+          brew install molten-vk
+          ls -la "$(brew --prefix molten-vk)/lib" "$(brew --prefix molten-vk)/etc/vulkan/icd.d" || true
+      - name: Package
+        run: |
+          mkdir -p pkg
+          cp "$HOME/angle"/out/mac/libEGL.dylib "$HOME/angle"/out/mac/libGLESv2.dylib pkg/
+          cp "$HOME/angle"/out/mac/libvulkan*.dylib pkg/ 2>/dev/null || true
+          cp "$(brew --prefix molten-vk)"/lib/libMoltenVK.dylib pkg/
+          cp "$(brew --prefix molten-vk)"/etc/vulkan/icd.d/MoltenVK_icd.json pkg/ 2>/dev/null || true
+          (cd "$HOME/angle" && git log -1 --format='ANGLE %H %cd') > pkg/VERSIONS.txt
+          brew info molten-vk --json | python3 -c 'import json,sys; d=json.load(sys.stdin)[0]; print("MoltenVK", d["installed"][0]["version"])' >> pkg/VERSIONS.txt
+          ls -la pkg; cat pkg/VERSIONS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: angle-macos-arm64
+          path: pkg/
