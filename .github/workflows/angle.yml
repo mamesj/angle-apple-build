@@ -24,7 +24,8 @@ jobs:
         run: |
           cd "$HOME/angle"
           gn gen out/mac --args='is_debug=false is_component_build=false target_cpu="arm64" angle_enable_vulkan=true angle_enable_metal=true angle_enable_gl=false angle_enable_swiftshader=false angle_build_tests=false angle_has_frame_capture=false build_with_chromium=false is_official_build=false symbol_level=0'
-          autoninja -C out/mac libEGL libGLESv2 2>&1 | tail -20
+          # ANGLE's own Vulkan loader too: ANGLE opens it from its own folder
+          autoninja -C out/mac libEGL libGLESv2 libvulkan 2>&1 | tail -20
           ls -la out/mac/*.dylib
       - name: MoltenVK (Vulkan on Metal)
         run: |
@@ -36,7 +37,8 @@ jobs:
           cp "$HOME/angle"/out/mac/libEGL.dylib "$HOME/angle"/out/mac/libGLESv2.dylib pkg/
           cp "$HOME/angle"/out/mac/libvulkan*.dylib pkg/ 2>/dev/null || true
           cp "$(brew --prefix molten-vk)"/lib/libMoltenVK.dylib pkg/
-          cp "$(brew --prefix molten-vk)"/etc/vulkan/icd.d/MoltenVK_icd.json pkg/ 2>/dev/null || true
+          # the driver file, pointing at the MoltenVK beside it
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["ICD"]["library_path"]="./libMoltenVK.dylib"; json.dump(d,open("pkg/MoltenVK_icd.json","w"),indent=2)' "$(brew --prefix molten-vk)"/etc/vulkan/icd.d/MoltenVK_icd.json
           (cd "$HOME/angle" && git log -1 --format='ANGLE %H %cd') > pkg/VERSIONS.txt
           brew info molten-vk --json | python3 -c 'import json,sys; d=json.load(sys.stdin)[0]; print("MoltenVK", d["installed"][0]["version"])' >> pkg/VERSIONS.txt
           ls -la pkg; cat pkg/VERSIONS.txt
